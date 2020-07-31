@@ -11,14 +11,12 @@ from typing import (
     List,
     Optional
 )
-import re
 import time
 import ujson
 import websockets
 from websockets.exceptions import ConnectionClosed
 
 from hummingbot.core.utils import async_ttl_cache
-from hummingbot.core.utils.async_utils import safe_gather
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.core.data_type.order_book_tracker_entry import OrderBookTrackerEntry
 from hummingbot.core.data_type.order_book_message import OrderBookMessage
@@ -66,7 +64,7 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
             trading_pairs_data = await trading_pairs_response.json()
 
-            trading_pairs: List[Dict[str, Any]] = [{"pair": item["url_symbol"],
+            trading_pairs: List[Dict[str, Any]] = [{"pair": item["url_symbol"].upper(),
                                                     "baseAsset": item["name"].split("/")[0],
                                                     "quoteAsset": item["name"].split("/")[1]}
                                                    for item in trading_pairs_data
@@ -74,10 +72,11 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
             all_markets: pd.DataFrame = pd.DataFrame.from_records(data=trading_pairs, index="pair")
 
+            pairs: List[str] = list(all_markets.index)
             volumes: List[float] = []
             prices: List[float] = []
-            for pair in trading_pairs:
-                ticker_url: str = f"{TICKER_URL}{pair}"
+            for pair in pairs:
+                ticker_url: str = f"{TICKER_URL}{pair.lower()}"
                 should_retry: bool = True
                 retry_counter: int = 0
                 while should_retry:
@@ -96,16 +95,19 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
             all_markets["volume"] = volumes
             all_markets["price"] = prices
-            btc_usd_price: float = all_markets.loc["btcusd"].price
-            btc_eur_price: float = all_markets.loc["btceur"].price
-            btc_gbp_price: float = all_markets.loc["btcgbp"].price
+            btc_usd_price: float = all_markets.loc["BTCUSD"].price
+            btc_eur_price: float = all_markets.loc["BTCEUR"].price
+            btc_gbp_price: float = all_markets.loc["BTCGBP"].price
+            btc_pax_price: float = all_markets.loc["BTCPAX"].price
             usd_volume: List[float] = []
             for row in all_markets.itertuples():
                 product_name: str = row.Index
                 quote_volume: float = row.volume
                 quote_price: float = row.price
-                if product_name.endswith(("USD", "PAX")):
+                if product_name.endswith("USD"):
                     usd_volume.append(quote_volume * quote_price)
+                elif product_name.endswith("PAX"):
+                    usd_volume.append(quote_volume * quote_price * (btc_usd_price / btc_pax_price))
                 elif product_name.endswith("BTC"):
                     usd_volume.append(quote_volume * quote_price * btc_usd_price)
                 elif product_name.endswith("EUR"):
@@ -126,9 +128,9 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
             except Exception:
                 self._trading_pairs = []
                 self.logger().network(
-                    f"Error getting active exchange information.",
+                    "Error getting active exchange information.",
                     exc_info=True,
-                    app_warning_msg=f"Error getting active exchange information. Check network connection."
+                    app_warning_msg="Error getting active exchange information. Check network connection."
                 )
         return self._trading_pairs
 
