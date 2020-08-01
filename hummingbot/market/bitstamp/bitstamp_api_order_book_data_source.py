@@ -22,9 +22,10 @@ from hummingbot.core.data_type.order_book_tracker_entry import OrderBookTrackerE
 from hummingbot.core.data_type.order_book_message import OrderBookMessage
 from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.logger import HummingbotLogger
-from hummingbot.market.binance.binance_order_book import BinanceOrderBook
+from hummingbot.market.bitstamp.bitstamp_order_book import BitstampOrderBook
 
-TICKER_URL = "https://www.bitstamp.net/api/v2/ticker/"
+ORDER_BOOK_SNAPSHOT_URL = "https://www.bitstamp.net/api/v2/order_book"
+TICKER_URL = "https://www.bitstamp.net/api/v2/ticker"
 TRADING_PAIRS_URL = "https://www.bitstamp.net/api/v2/trading-pairs-info/"
 MAX_RETRIES = 20
 NaN = float("nan")
@@ -64,7 +65,7 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
             trading_pairs_data = await trading_pairs_response.json()
 
-            trading_pairs: List[Dict[str, Any]] = [{"pair": item["url_symbol"].upper(),
+            trading_pairs: List[Dict[str, Any]] = [{"pair": item["url_symbol"],
                                                     "baseAsset": item["name"].split("/")[0],
                                                     "quoteAsset": item["name"].split("/")[1]}
                                                    for item in trading_pairs_data
@@ -76,7 +77,7 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
             volumes: List[float] = []
             prices: List[float] = []
             for pair in pairs:
-                ticker_url: str = f"{TICKER_URL}{pair.lower()}"
+                ticker_url: str = f"{TICKER_URL}/{pair}/"
                 should_retry: bool = True
                 retry_counter: int = 0
                 while should_retry:
@@ -95,24 +96,24 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
             all_markets["volume"] = volumes
             all_markets["price"] = prices
-            btc_usd_price: float = all_markets.loc["BTCUSD"].price
-            btc_eur_price: float = all_markets.loc["BTCEUR"].price
-            btc_gbp_price: float = all_markets.loc["BTCGBP"].price
-            btc_pax_price: float = all_markets.loc["BTCPAX"].price
+            btc_usd_price: float = all_markets.loc["btcusd"].price
+            btc_eur_price: float = all_markets.loc["btceur"].price
+            btc_gbp_price: float = all_markets.loc["btcgbp"].price
+            btc_pax_price: float = all_markets.loc["btcpax"].price
             usd_volume: List[float] = []
             for row in all_markets.itertuples():
                 product_name: str = row.Index
                 quote_volume: float = row.volume
                 quote_price: float = row.price
-                if product_name.endswith("USD"):
+                if product_name.endswith("usd"):
                     usd_volume.append(quote_volume * quote_price)
-                elif product_name.endswith("PAX"):
+                elif product_name.endswith("pax"):
                     usd_volume.append(quote_volume * quote_price * (btc_usd_price / btc_pax_price))
-                elif product_name.endswith("BTC"):
+                elif product_name.endswith("btc"):
                     usd_volume.append(quote_volume * quote_price * btc_usd_price)
-                elif product_name.endswith("EUR"):
+                elif product_name.endswith("eur"):
                     usd_volume.append(quote_volume * quote_price * (btc_usd_price / btc_eur_price))
-                elif product_name.endswith("GBP"):
+                elif product_name.endswith("gbp"):
                     usd_volume.append(quote_volume * quote_price * (btc_usd_price / btc_gbp_price))
                 else:
                     usd_volume.append(NaN)
@@ -135,14 +136,15 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
         return self._trading_pairs
 
     @staticmethod
-    async def get_snapshot(client: aiohttp.ClientSession, trading_pair: str, limit: int = 1000) -> Dict[str, Any]:
-        params: Dict = {"limit": str(limit), "symbol": trading_pair} if limit != 0 else {"symbol": trading_pair}
-        async with client.get("dddddd", params=params) as response:
+    async def get_snapshot(client: aiohttp.ClientSession, trading_pair: str) -> Dict[str, Any]:
+        order_book_url: str = f"{ORDER_BOOK_SNAPSHOT_URL}/{trading_pair}/"
+        async with client.get(order_book_url) as response:
             response: aiohttp.ClientResponse = response
             if response.status != 200:
-                raise IOError(f"Error fetching Binance market snapshot for {trading_pair}. "
+                raise IOError(f"Error fetching Bitstamp market snapshot for {trading_pair}. "
                               f"HTTP status is {response.status}.")
             data: Dict[str, Any] = await response.json()
+            data = {"trading_pair": trading_pair, **data}
 
             # Need to add the symbol into the snapshot message for the Kafka message queue.
             # Because otherwise, there'd be no way for the receiver to know which market the
@@ -159,9 +161,9 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
             number_of_pairs: int = len(trading_pairs)
             for index, trading_pair in enumerate(trading_pairs):
                 try:
-                    snapshot: Dict[str, Any] = await self.get_snapshot(client, trading_pair, 1000)
+                    snapshot: Dict[str, Any] = await self.get_snapshot(client, trading_pair)
                     snapshot_timestamp: float = time.time()
-                    snapshot_msg: OrderBookMessage = BinanceOrderBook.snapshot_message_from_exchange(
+                    snapshot_msg: OrderBookMessage = BitstampOrderBook.snapshot_message_from_exchange(
                         snapshot,
                         snapshot_timestamp,
                         metadata={"trading_pair": trading_pair}
@@ -211,7 +213,7 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     ws: websockets.WebSocketClientProtocol = ws
                     async for raw_msg in self._inner_messages(ws):
                         msg = ujson.loads(raw_msg)
-                        trade_msg: OrderBookMessage = BinanceOrderBook.trade_message_from_exchange(msg)
+                        trade_msg: OrderBookMessage = BitstampOrderBook.trade_message_from_exchange(msg)
                         output.put_nowait(trade_msg)
             except asyncio.CancelledError:
                 raise
@@ -231,7 +233,7 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     ws: websockets.WebSocketClientProtocol = ws
                     async for raw_msg in self._inner_messages(ws):
                         msg = ujson.loads(raw_msg)
-                        order_book_message: OrderBookMessage = BinanceOrderBook.diff_message_from_exchange(
+                        order_book_message: OrderBookMessage = BitstampOrderBook.diff_message_from_exchange(
                             msg, time.time())
                         output.put_nowait(order_book_message)
             except asyncio.CancelledError:
@@ -250,7 +252,7 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
                         try:
                             snapshot: Dict[str, Any] = await self.get_snapshot(client, trading_pair)
                             snapshot_timestamp: float = time.time()
-                            snapshot_msg: OrderBookMessage = BinanceOrderBook.snapshot_message_from_exchange(
+                            snapshot_msg: OrderBookMessage = BitstampOrderBook.snapshot_message_from_exchange(
                                 snapshot,
                                 snapshot_timestamp,
                                 metadata={"trading_pair": trading_pair}

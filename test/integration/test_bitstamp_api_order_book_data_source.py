@@ -28,18 +28,18 @@ class BitstampAPIOrderBookDataSourceUnitTest(unittest.TestCase):
 
     def test_get_active_exchange_markets(self):
         market_data: pd.DataFrame = self.run_async(self.order_book_data_source.get_active_exchange_markets())
-        self.assertIn("ETHUSD", market_data.index)
+        self.assertIn("ethusd", market_data.index)
 
     def test_get_trading_pairs(self):
         trading_pairs: List[str] = self.run_async(self.order_book_data_source.get_trading_pairs())
-        self.assertIn("ETHUSD", trading_pairs)
+        self.assertIn("ethusd", trading_pairs)
 
     async def get_snapshot(self):
         async with aiohttp.ClientSession() as client:
             trading_pairs: List[str] = await self.order_book_data_source.get_trading_pairs()
             trading_pair: str = trading_pairs[0]
             try:
-                snapshot: Dict[str, Any] = await self.order_book_data_source.get_snapshot(client, trading_pair, 1000)
+                snapshot: Dict[str, Any] = await self.order_book_data_source.get_snapshot(client, trading_pair)
                 return snapshot
             except Exception:
                 return None
@@ -51,7 +51,7 @@ class BitstampAPIOrderBookDataSourceUnitTest(unittest.TestCase):
 
     def test_get_tracking_pairs(self):
         tracking_pairs: Dict[str, OrderBookTrackerEntry] = self.run_async(self.order_book_data_source.get_tracking_pairs())
-        self.assertIsInstance(tracking_pairs["ETHDAI"], OrderBookTrackerEntry)
+        self.assertIsInstance(tracking_pairs["ethusd"], OrderBookTrackerEntry)
 
 
 def main():
