@@ -222,7 +222,10 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
                         if msg_type is None:
                             raise ValueError(f"Bitstamp Websocket message does not contain an event type - {msg}")
                         elif msg_type == "trade":
-                            trade_msg: OrderBookMessage = BitstampOrderBook.trade_message_from_exchange(msg)
+                            trade_msg: OrderBookMessage = BitstampOrderBook.trade_message_from_exchange(
+                                msg["data"],
+                                metadata={"trading_pair": msg["channel"].split("_")[2]}
+                            )
                             output.put_nowait(trade_msg)
                         else:
                             raise ValueError(f"Bitstamp Websocket received event type other then trade in trade listener - {msg}")
@@ -253,7 +256,10 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
                             raise ValueError(f"Bitstamp Websocket message does not contain an event type - {msg}")
                         elif msg_type == "data":
                             order_book_message: OrderBookMessage = BitstampOrderBook.diff_message_from_exchange(
-                                msg, time.time())
+                                msg["data"],
+                                time.time(),
+                                metadata={"trading_pair": msg["channel"].split("_")[2]}
+                            )
                             output.put_nowait(order_book_message)
                         else:
                             raise ValueError(
@@ -269,31 +275,33 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
         while True:
             try:
                 trading_pairs: List[str] = await self.get_trading_pairs()
-                async with aiohttp.ClientSession() as client:
-                    for trading_pair in trading_pairs:
-                        try:
-                            snapshot: Dict[str, Any] = await self.get_snapshot(client, trading_pair)
-                            snapshot_timestamp: float = time.time()
-                            snapshot_msg: OrderBookMessage = BitstampOrderBook.snapshot_message_from_exchange(
-                                snapshot,
-                                snapshot_timestamp,
-                                metadata={"trading_pair": trading_pair}
+
+                async with websockets.connect(STREAM_URL) as ws:
+                    ws: websockets.WebSocketClientProtocol = ws
+                    for pair in trading_pairs:
+                        subscribe_msg: Dict[str, Any] = {
+                            "event": "bts:subscribe",
+                            "data": {"channel": f"order_book_{pair}"}
+                        }
+                        await ws.send(ujson.dumps(subscribe_msg))
+                    async for raw_msg in self._inner_messages(ws):
+                        msg = ujson.loads(raw_msg)
+                        msg_type: str = msg.get("event", None)
+                        if msg_type is None:
+                            raise ValueError(f"Bitstamp Websocket message does not contain an event type - {msg}")
+                        elif msg_type == "data":
+                            order_book_message: OrderBookMessage = BitstampOrderBook.snapshot_message_from_exchange(
+                                msg["data"],
+                                time.time(),
+                                metadata={"trading_pair": msg["channel"].split("_")[2]}
                             )
-                            output.put_nowait(snapshot_msg)
-                            self.logger().debug(f"Saved order book snapshot for {trading_pair}")
-                            # Be careful not to go above Binance's API rate limits.
-                            await asyncio.sleep(5.0)
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception:
-                            self.logger().error("Unexpected error.", exc_info=True)
-                            await asyncio.sleep(5.0)
-                    this_hour: pd.Timestamp = pd.Timestamp.utcnow().replace(minute=0, second=0, microsecond=0)
-                    next_hour: pd.Timestamp = this_hour + pd.Timedelta(hours=1)
-                    delta: float = next_hour.timestamp() - time.time()
-                    await asyncio.sleep(delta)
+                            output.put_nowait(order_book_message)
+                        else:
+                            raise ValueError(
+                                f"Bitstamp Websocket received event type other then trade in trade listener - {msg}")
             except asyncio.CancelledError:
                 raise
             except Exception:
-                self.logger().error("Unexpected error.", exc_info=True)
-                await asyncio.sleep(5.0)
+                self.logger().error("Unexpected error with WebSocket connection. Retrying after 30 seconds...",
+                                    exc_info=True)
+                await asyncio.sleep(30.0)

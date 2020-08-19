@@ -49,12 +49,11 @@ cdef class BitstampOrderBook(OrderBook):
                                    metadata: Optional[Dict] = None) -> OrderBookMessage:
         if metadata:
             msg.update(metadata)
-        ts = int(msg["data"]["timestamp"])
+        ts = int(msg["timestamp"])
         return OrderBookMessage(OrderBookMessageType.DIFF, {
-            "trading_pair": msg["channel"].split("_")[2],
             "update_id": ts,
-            "bids": msg["data"]["bids"],
-            "asks": msg["data"]["asks"]
+            "bids": msg["bids"],
+            "asks": msg["asks"]
         }, timestamp=timestamp)
 
     @classmethod
@@ -125,10 +124,9 @@ cdef class BitstampOrderBook(OrderBook):
     def trade_message_from_exchange(cls, msg: Dict[str, any], metadata: Optional[Dict] = None):
         if metadata:
             msg.update(metadata)
-        ts = int(msg["data"]["timestamp"])
+        ts = int(msg["timestamp"])
         return OrderBookMessage(OrderBookMessageType.TRADE, {
-            "trading_pair": msg["channel"].split("_")[2],
-            "trade_type": float(TradeType.SELL.value) if msg["data"]["type"] == 1 else float(TradeType.BUY.value),
+            "trade_type": float(TradeType.SELL.value) if msg["type"] == 1 else float(TradeType.BUY.value),
             "trade_id": msg["id"],
             "update_id": ts,
             "price": msg["price"],
