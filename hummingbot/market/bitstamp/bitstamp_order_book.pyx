@@ -124,15 +124,15 @@ cdef class BitstampOrderBook(OrderBook):
     def trade_message_from_exchange(cls, msg: Dict[str, any], metadata: Optional[Dict] = None):
         if metadata:
             msg.update(metadata)
-        ts = msg["E"]
+        ts = int(msg["data"]["timestamp"])
         return OrderBookMessage(OrderBookMessageType.TRADE, {
-            "trading_pair": msg["s"],
-            "trade_type": float(TradeType.SELL.value) if msg["m"] else float(TradeType.BUY.value),
-            "trade_id": msg["t"],
+            "trading_pair": msg["channel"].split("_")[2],
+            "trade_type": float(TradeType.SELL.value) if msg["data"]["type"] == 1 else float(TradeType.BUY.value),
+            "trade_id": msg["id"],
             "update_id": ts,
-            "price": msg["p"],
-            "amount": msg["q"]
-        }, timestamp=ts * 1e-3)
+            "price": msg["price"],
+            "amount": msg["amount"]
+        }, timestamp=ts)
 
     @classmethod
     def from_snapshot(cls, msg: OrderBookMessage) -> "OrderBook":

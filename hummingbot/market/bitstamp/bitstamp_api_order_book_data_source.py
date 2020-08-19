@@ -27,6 +27,7 @@ from hummingbot.market.bitstamp.bitstamp_order_book import BitstampOrderBook
 ORDER_BOOK_SNAPSHOT_URL = "https://www.bitstamp.net/api/v2/order_book"
 TICKER_URL = "https://www.bitstamp.net/api/v2/ticker"
 TRADING_PAIRS_URL = "https://www.bitstamp.net/api/v2/trading-pairs-info/"
+STREAM_URL = "wss://ws.bitstamp.net"
 MAX_RETRIES = 20
 NaN = float("nan")
 
@@ -206,15 +207,25 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
         while True:
             try:
                 trading_pairs: List[str] = await self.get_trading_pairs()
-                ws_path: str = "/".join([f"{trading_pair.lower()}@trade" for trading_pair in trading_pairs])
-                stream_url: str = f"dddd/{ws_path}"
 
-                async with websockets.connect(stream_url) as ws:
+                async with websockets.connect(STREAM_URL) as ws:
                     ws: websockets.WebSocketClientProtocol = ws
+                    for pair in trading_pairs:
+                        subscribe_msg: Dict[str, Any] = {
+                            "event": "bts:subscribe",
+                            "data": {"channel": f"order_book_{pair}"}
+                        }
+                        await ws.send(ujson.dumps(subscribe_msg))
                     async for raw_msg in self._inner_messages(ws):
                         msg = ujson.loads(raw_msg)
-                        trade_msg: OrderBookMessage = BitstampOrderBook.trade_message_from_exchange(msg)
-                        output.put_nowait(trade_msg)
+                        msg_type: str = msg.get("event", None)
+                        if msg_type is None:
+                            raise ValueError(f"Bitstamp Websocket message does not contain an event type - {msg}")
+                        elif msg_type == "trade":
+                            trade_msg: OrderBookMessage = BitstampOrderBook.trade_message_from_exchange(msg)
+                            output.put_nowait(trade_msg)
+                        else:
+                            raise ValueError(f"Bitstamp Websocket received event type other then trade in trade listener - {msg}")
             except asyncio.CancelledError:
                 raise
             except Exception:
