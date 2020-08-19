@@ -213,7 +213,7 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     for pair in trading_pairs:
                         subscribe_msg: Dict[str, Any] = {
                             "event": "bts:subscribe",
-                            "data": {"channel": f"order_book_{pair}"}
+                            "data": {"channel": f"live_trades_{pair}"}
                         }
                         await ws.send(ujson.dumps(subscribe_msg))
                     async for raw_msg in self._inner_messages(ws):
@@ -237,16 +237,27 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
         while True:
             try:
                 trading_pairs: List[str] = await self.get_trading_pairs()
-                ws_path: str = "/".join([f"{trading_pair.lower()}@depth" for trading_pair in trading_pairs])
-                stream_url: str = f"ddddddd/{ws_path}"
 
-                async with websockets.connect(stream_url) as ws:
+                async with websockets.connect(STREAM_URL) as ws:
                     ws: websockets.WebSocketClientProtocol = ws
+                    for pair in trading_pairs:
+                        subscribe_msg: Dict[str, Any] = {
+                            "event": "bts:subscribe",
+                            "data": {"channel": f"diff_order_book_{pair}"}
+                        }
+                        await ws.send(ujson.dumps(subscribe_msg))
                     async for raw_msg in self._inner_messages(ws):
                         msg = ujson.loads(raw_msg)
-                        order_book_message: OrderBookMessage = BitstampOrderBook.diff_message_from_exchange(
-                            msg, time.time())
-                        output.put_nowait(order_book_message)
+                        msg_type: str = msg.get("event", None)
+                        if msg_type is None:
+                            raise ValueError(f"Bitstamp Websocket message does not contain an event type - {msg}")
+                        elif msg_type == "data":
+                            order_book_message: OrderBookMessage = BitstampOrderBook.diff_message_from_exchange(
+                                msg, time.time())
+                            output.put_nowait(order_book_message)
+                        else:
+                            raise ValueError(
+                                f"Bitstamp Websocket received event type other then trade in trade listener - {msg}")
             except asyncio.CancelledError:
                 raise
             except Exception:
