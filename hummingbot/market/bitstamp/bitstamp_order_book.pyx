@@ -51,6 +51,7 @@ cdef class BitstampOrderBook(OrderBook):
             msg.update(metadata)
         ts = int(msg["timestamp"])
         return OrderBookMessage(OrderBookMessageType.DIFF, {
+            "trading_pair": msg["trading_pair"],
             "update_id": ts,
             "bids": msg["bids"],
             "asks": msg["asks"]
@@ -126,6 +127,7 @@ cdef class BitstampOrderBook(OrderBook):
             msg.update(metadata)
         ts = int(msg["timestamp"])
         return OrderBookMessage(OrderBookMessageType.TRADE, {
+            "trading_pair": msg["trading_pair"],
             "trade_type": float(TradeType.SELL.value) if msg["type"] == 1 else float(TradeType.BUY.value),
             "trade_id": msg["id"],
             "update_id": ts,
