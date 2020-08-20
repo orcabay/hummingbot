@@ -221,6 +221,8 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
                         msg_type: str = msg.get("event", None)
                         if msg_type is None:
                             raise ValueError(f"Bitstamp Websocket message does not contain an event type - {msg}")
+                        elif msg_type == "bts:subscription_succeeded":
+                            continue
                         elif msg_type == "trade":
                             trade_msg: OrderBookMessage = BitstampOrderBook.trade_message_from_exchange(
                                 msg["data"],
@@ -254,6 +256,8 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
                         msg_type: str = msg.get("event", None)
                         if msg_type is None:
                             raise ValueError(f"Bitstamp Websocket message does not contain an event type - {msg}")
+                        elif msg_type == "bts:subscription_succeeded":
+                            continue
                         elif msg_type == "data":
                             order_book_message: OrderBookMessage = BitstampOrderBook.diff_message_from_exchange(
                                 msg["data"],
@@ -263,7 +267,7 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
                             output.put_nowait(order_book_message)
                         else:
                             raise ValueError(
-                                f"Bitstamp Websocket received event type other then trade in trade listener - {msg}")
+                                f"Bitstamp Websocket received event type other then data in order book diff listener - {msg}")
             except asyncio.CancelledError:
                 raise
             except Exception:
