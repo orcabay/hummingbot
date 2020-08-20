@@ -36,7 +36,7 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
     MESSAGE_TIMEOUT = 30.0
     PING_TIMEOUT = 10.0
 
-    _bitstampobds_logger: Optional[HummingbotLogger] = None
+    _bstpobds_logger: Optional[HummingbotLogger] = None
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
