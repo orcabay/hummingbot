@@ -1,7 +1,7 @@
-import base64
 import hashlib
 import hmac
 from hummingbot.market.bitstamp.bitstamp_tracking_nonce import get_tracking_nonce
+from typing import Dict
 
 
 class BitstampAuth:
@@ -10,23 +10,23 @@ class BitstampAuth:
         self.api_key = api_key
         self.secret_key = secret_key
 
-    def generate_auth_params(self) -> str:
+    def generate_auth_dict(self) -> Dict[str, str]:
         """
         Generates authentication signature and returns it in request parameters
         :return: a string of request parameters including the signature
         """
 
-        # Decode API private key from base64 format displayed in account management
-        api_secret: bytes = base64.b64decode(self.secret_key)
         # Get next nonce
         api_nonce: str = get_tracking_nonce()
-        # Decode signature message to bytes
-        sig_msg: bytes = base64.b64decode(api_nonce + self.client_id + self.api_key)
 
-        # Cryptographic hash algorithms
-        api_hmac: hmac.HMAC = hmac.new(api_secret, sig_msg, hashlib.sha256)
+        message = api_nonce + self.client_id + self.api_key
+        api_signature = hmac.new(
+            self.secret_key.encode(),
+            message.encode(),
+            hashlib.sha256).hexdigest().upper()
 
-        # Encode signature into base64 format used in API-Sign value
-        api_signature: bytes = base64.b64encode(api_hmac.digest())
-
-        return f"key={self.api_key}&signature={str(api_signature, 'utf-8')}&nonce={api_nonce}"
+        return {
+            "key": self.api_key,
+            "signature": api_signature,
+            "nonce": api_nonce
+        }

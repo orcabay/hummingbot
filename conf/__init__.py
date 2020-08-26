@@ -63,6 +63,11 @@ bittrex_secret_key = os.getenv("BITTREX_SECRET_KEY")
 bitfinex_api_key = os.getenv("BITFINEX_API_KEY")
 bitfinex_secret_key = os.getenv("BITFINEX_SECRET_KEY")
 
+# Bitstamp
+bitstamp_client_id = os.getenv("BITSTAMP_CLIENT_ID")
+bitstamp_api_key = os.getenv("BITSTAMP_API_KEY")
+bitstamp_secret_key = os.getenv("BITSTAMP_SECRET_KEY")
+
 # KuCoin Tests
 kucoin_api_key = os.getenv("KUCOIN_API_KEY")
 kucoin_secret_key = os.getenv("KUCOIN_SECRET_KEY")
