@@ -18,9 +18,10 @@ class BitstampAuth:
 
         # Get next nonce
         api_nonce: str = get_tracking_nonce()
-
-        message = api_nonce + self.client_id + self.api_key
-        api_signature = hmac.new(
+        # Compile message
+        message: str = api_nonce + self.client_id + self.api_key
+        # Calculate signature
+        api_signature: str = hmac.new(
             self.secret_key.encode(),
             message.encode(),
             hashlib.sha256).hexdigest().upper()
