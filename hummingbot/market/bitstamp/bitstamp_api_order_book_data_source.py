@@ -24,10 +24,11 @@ from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.logger import HummingbotLogger
 from hummingbot.market.bitstamp.bitstamp_order_book import BitstampOrderBook
 
-ORDER_BOOK_SNAPSHOT_URL = "https://www.bitstamp.net/api/v2/order_book"
-TICKER_URL = "https://www.bitstamp.net/api/v2/ticker"
-TRADING_PAIRS_URL = "https://www.bitstamp.net/api/v2/trading-pairs-info/"
-STREAM_URL = "wss://ws.bitstamp.net"
+BITSTAMP_ROOT_URL = "https://front.clients.stagebts.net/api/v2/"
+ORDER_BOOK_SNAPSHOT_URL = "order_book/"
+TICKER_URL = "ticker/"
+TRADING_PAIRS_URL = "trading-pairs-info/"
+STREAM_URL = "wss://ws.clients.stagebts.net"
 MAX_RETRIES = 20
 NaN = float("nan")
 
@@ -40,9 +41,9 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
-        if cls._bitstampobds_logger is None:
-            cls._bitstampobds_logger = logging.getLogger(__name__)
-        return cls._bitstampobds_logger
+        if cls._bstpobds_logger is None:
+            cls._bstpobds_logger = logging.getLogger(__name__)
+        return cls._bstpobds_logger
 
     def __init__(self, trading_pairs: Optional[List[str]] = None):
         super().__init__()
@@ -57,7 +58,7 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         async with aiohttp.ClientSession() as client:
 
-            trading_pairs_response = await client.get(TRADING_PAIRS_URL)
+            trading_pairs_response = await client.get(f"{BITSTAMP_ROOT_URL}{TRADING_PAIRS_URL}")
             trading_pairs_response: aiohttp.ClientResponse = trading_pairs_response
 
             if trading_pairs_response.status != 200:
@@ -78,7 +79,7 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
             volumes: List[float] = []
             prices: List[float] = []
             for pair in pairs:
-                ticker_url: str = f"{TICKER_URL}/{pair}/"
+                ticker_url: str = f"{BITSTAMP_ROOT_URL}{TICKER_URL}{pair}/"
                 should_retry: bool = True
                 retry_counter: int = 0
                 while should_retry:
@@ -138,7 +139,7 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     @staticmethod
     async def get_snapshot(client: aiohttp.ClientSession, trading_pair: str) -> Dict[str, Any]:
-        order_book_url: str = f"{ORDER_BOOK_SNAPSHOT_URL}/{trading_pair}/"
+        order_book_url: str = f"{BITSTAMP_ROOT_URL}{ORDER_BOOK_SNAPSHOT_URL}{trading_pair}/"
         async with client.get(order_book_url) as response:
             response: aiohttp.ClientResponse = response
             if response.status != 200:
@@ -293,6 +294,8 @@ class BitstampAPIOrderBookDataSource(OrderBookTrackerDataSource):
                         msg_type: str = msg.get("event", None)
                         if msg_type is None:
                             raise ValueError(f"Bitstamp Websocket message does not contain an event type - {msg}")
+                        elif msg_type == "bts:subscription_succeeded":
+                            pass
                         elif msg_type == "data":
                             order_book_message: OrderBookMessage = BitstampOrderBook.snapshot_message_from_exchange(
                                 msg["data"],
