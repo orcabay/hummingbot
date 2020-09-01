@@ -125,7 +125,7 @@ cdef class BitstampOrderBook(OrderBook):
     def trade_message_from_exchange(cls, msg: Dict[str, any], metadata: Optional[Dict] = None):
         if metadata:
             msg.update(metadata)
-        ts = int(msg["timestamp"])
+        ts = float(msg["timestamp"])
         return OrderBookMessage(OrderBookMessageType.TRADE, {
             "trading_pair": msg["trading_pair"],
             "trade_type": float(TradeType.SELL.value) if msg["type"] == 1 else float(TradeType.BUY.value),

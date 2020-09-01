@@ -88,19 +88,18 @@ class BitstampOrderBookTrackerUnitTest(unittest.TestCase):
         # Wait 5 seconds to process some diffs.
         self.ev_loop.run_until_complete(asyncio.sleep(10.0))
         order_books: Dict[str, OrderBook] = self.order_book_tracker.order_books
-        btcusdt_book: OrderBook = order_books["btcusd"]
-        xrpusdt_book: OrderBook = order_books["ethbtc"]
-        # print(btcusdt_book.snapshot)
-        # print("xrpusdt")
-        # print(xrpusdt_book.snapshot)
-        self.assertGreaterEqual(btcusdt_book.get_price_for_volume(True, 10).result_price,
-                                btcusdt_book.get_price(True))
-        self.assertLessEqual(btcusdt_book.get_price_for_volume(False, 10).result_price,
-                             btcusdt_book.get_price(False))
-        self.assertGreaterEqual(xrpusdt_book.get_price_for_volume(True, 10000).result_price,
-                                xrpusdt_book.get_price(True))
-        self.assertLessEqual(xrpusdt_book.get_price_for_volume(False, 10000).result_price,
-                             xrpusdt_book.get_price(False))
+        btcusd_book: OrderBook = order_books["btcusd"]
+        ethbtc_book: OrderBook = order_books["ethbtc"]
+        # print(btcusd_book.snapshot)
+        # print(ethbtc_book.snapshot)
+        self.assertGreaterEqual(btcusd_book.get_price_for_volume(True, 10).result_price,
+                                btcusd_book.get_price(True))
+        self.assertLessEqual(btcusd_book.get_price_for_volume(False, 10).result_price,
+                             btcusd_book.get_price(False))
+        self.assertGreaterEqual(ethbtc_book.get_price_for_volume(True, 100).result_price,
+                                ethbtc_book.get_price(True))
+        self.assertLessEqual(ethbtc_book.get_price_for_volume(False, 100).result_price,
+                             ethbtc_book.get_price(False))
 
 
 def main():

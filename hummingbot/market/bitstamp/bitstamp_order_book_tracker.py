@@ -27,9 +27,9 @@ class BitstampOrderBookTracker(OrderBookTracker):
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
-        if cls._bitstampobt_logger is None:
-            cls._bitstampobt_logger = logging.getLogger(__name__)
-        return cls._bitstampobt_logger
+        if cls._bstpobt_logger is None:
+            cls._bstpobt_logger = logging.getLogger(__name__)
+        return cls._bstpobt_logger
 
     def __init__(self,
                  data_source_type: OrderBookTrackerDataSourceType = OrderBookTrackerDataSourceType.EXCHANGE_API,
