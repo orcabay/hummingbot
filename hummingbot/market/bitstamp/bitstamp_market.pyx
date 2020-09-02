@@ -391,14 +391,14 @@ cdef class BitstampMarket(MarketBase):
 
         for info in raw_trading_pair_info:
             try:
+                if info["trading"] is "Disabled":
+                    continue
                 trading_rules.append(
-                    TradingRule(trading_pair=info["symbol"],
-                                min_order_size=Decimal(info["min-order-amt"]),
-                                max_order_size=Decimal(info["max-order-amt"]),
-                                min_price_increment=Decimal(f"1e-{info['price-precision']}"),
-                                min_base_amount_increment=Decimal(f"1e-{info['amount-precision']}"),
-                                min_quote_amount_increment=Decimal(f"1e-{info['value-precision']}"),
-                                min_notional_size=Decimal(info["min-order-value"]))
+                    TradingRule(trading_pair=info["url_symbol"],
+                                min_price_increment=Decimal(f"1e-{info['counter_decimals']}"),
+                                min_base_amount_increment=Decimal(f"1e-{info['base_decimals']}"),
+                                min_quote_amount_increment=Decimal(f"1e-{info['counter_decimals']}"),
+                                min_notional_size=Decimal(info["minimum_order"]))
                 )
             except Exception:
                 self.logger().error(f"Error parsing the trading pair rule {info}. Skipping.", exc_info=True)
@@ -589,26 +589,20 @@ cdef class BitstampMarket(MarketBase):
                           is_buy: bool,
                           order_type: OrderType,
                           price: Decimal) -> str:
-        path_url = "order/orders/place"
-        side = "buy" if is_buy else "sell"
-        order_type_str = "limit" if order_type is OrderType.LIMIT else "market"
+        path_url = "v2/buy/" if is_buy else "v2/sell/"
+        path_url += f"{trading_pair}/" if order_type is OrderType.LIMIT else f"market/{trading_pair}/"
         params = {
-            "account-id": self._account_id,
             "amount": f"{amount:f}",
-            "client-order-id": order_id,
-            "symbol": trading_pair,
-            "type": f"{side}-{order_type_str}",
         }
         if order_type is OrderType.LIMIT:
             params["price"] = f"{price:f}"
         exchange_order_id = await self._api_request(
             "post",
             path_url=path_url,
-            params=params,
             data=params,
             is_auth_required=True
         )
-        return str(exchange_order_id)
+        return exchange_order_id["id"]
 
     async def execute_buy(self,
                           order_id: str,
@@ -664,11 +658,11 @@ cdef class BitstampMarket(MarketBase):
             self.c_stop_tracking_order(order_id)
             order_type_str = "MARKET" if order_type == OrderType.MARKET else "LIMIT"
             self.logger().network(
-                f"Error submitting buy {order_type_str} order to Huobi for "
+                f"Error submitting buy {order_type_str} order to Bitstamp for "
                 f"{decimal_amount} {trading_pair} "
                 f"{decimal_price if order_type is OrderType.LIMIT else ''}.",
                 exc_info=True,
-                app_warning_msg=f"Failed to submit buy order to Huobi. Check API key and network connection."
+                app_warning_msg=f"Failed to submit buy order to Bitstamp. Check API key and network connection."
             )
             self.c_trigger_event(self.MARKET_ORDER_FAILURE_EVENT_TAG,
                                  MarketOrderFailureEvent(self._current_timestamp, order_id, order_type))
@@ -736,11 +730,11 @@ cdef class BitstampMarket(MarketBase):
             self.c_stop_tracking_order(order_id)
             order_type_str = "MARKET" if order_type is OrderType.MARKET else "LIMIT"
             self.logger().network(
-                f"Error submitting sell {order_type_str} order to Huobi for "
+                f"Error submitting sell {order_type_str} order to Bitstamp for "
                 f"{decimal_amount} {trading_pair} "
                 f"{decimal_price if order_type is OrderType.LIMIT else ''}.",
                 exc_info=True,
-                app_warning_msg=f"Failed to submit sell order to Huobi. Check API key and network connection."
+                app_warning_msg=f"Failed to submit sell order to Bitstamp. Check API key and network connection."
             )
             self.c_trigger_event(self.MARKET_ORDER_FAILURE_EVENT_TAG,
                                  MarketOrderFailureEvent(self._current_timestamp, order_id, order_type))
@@ -748,7 +742,8 @@ cdef class BitstampMarket(MarketBase):
     cdef str c_sell(self,
                     str trading_pair,
                     object amount,
-                    object order_type=OrderType.MARKET, object price=s_decimal_0,
+                    object order_type=OrderType.MARKET,
+                    object price=s_decimal_0,
                     dict kwargs={}):
         cdef:
             int64_t tracking_nonce = <int64_t> get_tracking_nonce()
@@ -761,8 +756,8 @@ cdef class BitstampMarket(MarketBase):
             tracked_order = self._in_flight_orders.get(order_id)
             if tracked_order is None:
                 raise ValueError(f"Failed to cancel order - {order_id}. Order not found.")
-            path_url = f"order/orders/{tracked_order.exchange_order_id}/submitcancel"
-            response = await self._api_request("post", path_url=path_url, is_auth_required=True)
+            path_url = f"v2/cancel_order/"
+            response = await self._api_request("post", path_url=path_url, data={"id": order_id}, is_auth_required=True)
 
         except BitstampAPIError as e:
             order_state = e.error_payload.get("error").get("order-state")
@@ -800,24 +795,17 @@ cdef class BitstampMarket(MarketBase):
             return []
         cancel_order_ids = [o.exchange_order_id for o in open_orders]
         self.logger().debug(f"cancel_order_ids {cancel_order_ids} {open_orders}")
-        path_url = "order/orders/batchcancel"
-        params = {"order-ids": ujson.dumps(cancel_order_ids)}
-        data = {"order-ids": cancel_order_ids}
+        path_url = "cancel_all_orders/"
         cancellation_results = []
         try:
             cancel_all_results = await self._api_request(
                 "post",
                 path_url=path_url,
-                params=params,
-                data=data,
                 is_auth_required=True
             )
 
-            for oid in cancel_all_results.get("success", []):
-                cancellation_results.append(CancellationResult(oid, True))
-            for cancel_error in cancel_all_results.get("failed", []):
-                oid = cancel_error["order-id"]
-                cancellation_results.append(CancellationResult(oid, False))
+            for order in open_orders:
+                cancellation_results.append(CancellationResult(order.exchange_order_id, True))
         except Exception as e:
             self.logger().network(
                 f"Failed to cancel all orders: {cancel_order_ids}",
