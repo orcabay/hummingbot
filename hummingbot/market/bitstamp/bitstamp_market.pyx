@@ -422,7 +422,7 @@ cdef class BitstampMarket(MarketBase):
             ]
         }
         """
-        path_url = "order_status/"
+        path_url = "v2/order_status/"
         return await self._api_request("post", path_url=path_url, data={"id": exchange_order_id}, is_auth_required=True)
 
     async def _update_order_status(self):
@@ -461,7 +461,7 @@ cdef class BitstampMarket(MarketBase):
                     continue
 
                 order_state = order_update["status"]
-                # possible order states are "Open", "Finished"
+                # possible order states are "Open", "Finished", "Cancelled"
 
                 for transaction in order_update["transactions"]:
                     # skip already processed transactions

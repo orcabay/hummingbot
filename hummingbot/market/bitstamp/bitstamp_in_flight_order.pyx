@@ -32,7 +32,7 @@ cdef class BitstampInFlightOrder(InFlightOrderBase):
             trade_type,
             price,
             amount,
-            initial_state  # submitted, partial-filled, cancelling, filled, canceled, partial-canceled
+            initial_state  # Open, Finished, Cancelled
         )
         self.last_transaction_id = 0
 
@@ -42,7 +42,7 @@ cdef class BitstampInFlightOrder(InFlightOrderBase):
 
     @property
     def is_cancelled(self) -> bool:
-        return self.last_state is "Finished" and self.executed_amount_base < self.amount
+        return self.last_state is "Cancelled"
 
     @property
     def is_failure(self) -> bool:
