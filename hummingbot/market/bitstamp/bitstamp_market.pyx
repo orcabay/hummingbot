@@ -398,7 +398,7 @@ cdef class BitstampMarket(MarketBase):
                                 min_price_increment=Decimal(f"1e-{info['counter_decimals']}"),
                                 min_base_amount_increment=Decimal(f"1e-{info['base_decimals']}"),
                                 min_quote_amount_increment=Decimal(f"1e-{info['counter_decimals']}"),
-                                min_notional_size=Decimal(info["minimum_order"]))
+                                min_notional_size=Decimal(info["minimum_order"].split(" ")[0]))
                 )
             except Exception:
                 self.logger().error(f"Error parsing the trading pair rule {info}. Skipping.", exc_info=True)
@@ -805,7 +805,7 @@ cdef class BitstampMarket(MarketBase):
             )
 
             for order in open_orders:
-                cancellation_results.append(CancellationResult(order.exchange_order_id, True))
+                cancellation_results.append(CancellationResult(order.exchange_order_id, cancel_all_results is "true"))
         except Exception as e:
             self.logger().network(
                 f"Failed to cancel all orders: {cancel_order_ids}",
