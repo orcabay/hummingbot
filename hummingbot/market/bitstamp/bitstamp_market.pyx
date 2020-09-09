@@ -20,6 +20,7 @@ from typing import (
     Tuple
 )
 import ujson
+from urllib.parse import urlencode
 
 import hummingbot
 from hummingbot.core.clock cimport Clock
@@ -67,6 +68,7 @@ hm_logger = None
 s_decimal_0 = Decimal(0)
 TRADING_PAIR_SPLITTER = re.compile(r"^(\w+)(usd|eur|btc|gbp|pax)$")
 BITSTAMP_ROOT_URL = "https://front.clients.stagebts.net/api/"
+# BITSTAMP_ROOT_URL = "https://www.bitstamp.net/api/"
 
 
 class BitstampAPIError(IOError):
@@ -226,7 +228,6 @@ cdef class BitstampMarket(MarketBase):
         self._order_book_tracker.start()
         self._trading_rules_polling_task = safe_ensure_future(self._trading_rules_polling_loop())
         if self._trading_required:
-            await self._update_account_id()
             self._status_polling_task = safe_ensure_future(self._status_polling_loop())
 
     def _stop_network(self):
@@ -243,7 +244,7 @@ cdef class BitstampMarket(MarketBase):
 
     async def check_network(self) -> NetworkStatus:
         try:
-            await self._api_request(method="get", path_url="common/timestamp")
+            await self._api_request(method="get", path_url="ticker/")
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -272,8 +273,7 @@ cdef class BitstampMarket(MarketBase):
                            params: Optional[Dict[str, Any]] = None,
                            data=None,
                            is_auth_required: bool = False) -> Dict[str, Any]:
-        content_type = "application/json" if method == "post" else "application/x-www-form-urlencoded"
-        headers = {"Content-Type": content_type}
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
         url = BITSTAMP_ROOT_URL + path_url
         client = await self._http_client()
         if is_auth_required:
@@ -289,7 +289,7 @@ cdef class BitstampMarket(MarketBase):
                 path=f"/{path_url}",
                 headers=headers,
                 params=params,
-                data=ujson.dumps(data),
+                data=urlencode(data),
                 timeout=100
             )
         else:
@@ -298,55 +298,43 @@ cdef class BitstampMarket(MarketBase):
                 url=url,
                 headers=headers,
                 params=params,
-                data=ujson.dumps(data),
+                data=urlencode(data) if data is not None else None,
                 timeout=100
             )
 
         async with response_coro as response:
+            # self.logger().info(f"{response.status}, {method}, {url}, {headers}, {params}, {data}")
             if response.status != 200:
                 raise IOError(f"Error fetching data from {url}. HTTP status is {response.status}.")
             try:
                 parsed_response = await response.json()
             except Exception:
                 raise IOError(f"Error parsing data from {url}.")
-
+            # self.logger().info(f"{response.status}, {method}, {url}, {headers}, {params}, {data}, {parsed_response}")
             if "error" in parsed_response:
                 self.logger().error(f"Error received from {url}. Response is {parsed_response}.")
-                raise BitstampAPIError({"error": parsed_response})
+                raise BitstampAPIError({"error": parsed_response["error"]})
             return parsed_response
-
-    async def _update_account_id(self) -> str:
-        accounts = await self._api_request("get", path_url="account/accounts", is_auth_required=True)
-        try:
-            for account in accounts:
-                if account["state"] == "working" and account["type"] == "spot":
-                    self._account_id = str(account["id"])
-        except Exception as e:
-            raise ValueError(f"Unable to retrieve account id: {e}")
 
     async def _update_balances(self):
         cdef:
-            str path_url = "balance/"
+            str path_url = "v2/balance/"
             dict data
-            list balances
             dict new_available_balances = {}
             dict new_balances = {}
             str asset_name
             object balance
 
         data = await self._api_request("post", path_url=path_url, is_auth_required=True)
-        balances = data.get("dict", Dict[str, str])
-        if len(balances) > 0:
-            for k, v in balances:
+        if len(data) > 0:
+            for k in data:
                 asset_name = k.split("_")[0]
-                balance = Decimal(v)
+                balance = Decimal(data[k])
+                if balance == s_decimal_0:
+                    continue
                 if "balance" in k:
-                    if balance == s_decimal_0:
-                        continue
                     new_balances[asset_name] = balance
                 if "available" in k:
-                    if balance == s_decimal_0:
-                        continue
                     new_available_balances[asset_name] = balance
 
             self._account_available_balances.clear()
@@ -361,15 +349,6 @@ cdef class BitstampMarket(MarketBase):
                           object order_side,
                           object amount,
                           object price):
-        # https://www.hbg.com/en-us/about/fee/
-        """
-
-        if order_type is OrderType.LIMIT and fee_overrides_config_map["bitstamp_maker_fee"].value is not None:
-            return TradeFee(percent=fee_overrides_config_map["bitstamp_maker_fee"].value / Decimal("100"))
-        if order_type is OrderType.MARKET and fee_overrides_config_map["bitstamp_taker_fee"].value is not None:
-            return TradeFee(percent=fee_overrides_config_map["bitstamp_taker_fee"].value / Decimal("100"))
-        return TradeFee(percent=Decimal("0.002"))
-        """
         is_maker = order_type is OrderType.LIMIT
         return estimate_fee("bitstamp", is_maker)
 
@@ -460,6 +439,8 @@ cdef class BitstampMarket(MarketBase):
                     )
                     continue
 
+                self.logger().info(f"order {order_update}")
+
                 order_state = order_update["status"]
                 # possible order states are "Open", "Finished", "Cancelled"
 
@@ -472,8 +453,8 @@ cdef class BitstampMarket(MarketBase):
 
                     tracked_order.executed_amount_base += execute_amount_base_diff
                     tracked_order.executed_amount_quote += execute_amount_quote_diff
-                    tracked_order.fee_paid += Decimal(order_update["fee"])
-                    execute_price = Decimal(order_update[tracked_order.price_pair])
+                    tracked_order.fee_paid += Decimal(transaction["fee"])
+                    execute_price = Decimal(transaction["price"])
                     self.logger().info(f"Filled {execute_amount_base_diff} out of {tracked_order.amount} of the "
                                        f"order {tracked_order.client_order_id}.")
                     self.c_trigger_event(self.MARKET_ORDER_FILLED_EVENT_TAG, OrderFilledEvent(
@@ -492,9 +473,9 @@ cdef class BitstampMarket(MarketBase):
                             execute_price,
                             execute_amount_base_diff,
                         ),
-                        exchange_trade_id=order_update["order_id"]
+                        exchange_trade_id=transaction["tid"]
                     ))
-                    self.last_transaction_id = transaction["tid"]
+                    self.c_set_last_transaction_id(transaction["tid"])
 
                 if tracked_order.is_open:
                     continue
@@ -560,7 +541,7 @@ cdef class BitstampMarket(MarketBase):
         while True:
             try:
                 await self._update_trading_rules()
-                await asyncio.sleep(60 * 5)
+                await asyncio.sleep(60)
             except asyncio.CancelledError:
                 raise
             except Exception:
