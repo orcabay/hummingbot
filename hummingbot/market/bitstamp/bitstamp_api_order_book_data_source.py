@@ -24,11 +24,13 @@ from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.logger import HummingbotLogger
 from hummingbot.market.bitstamp.bitstamp_order_book import BitstampOrderBook
 
-BITSTAMP_ROOT_URL = "https://www.bitstamp.net/api/v2/"
+# BITSTAMP_ROOT_URL = "https://www.bitstamp.net/api/v2/"
+BITSTAMP_ROOT_URL = "https://front.clients.stagebts.net/api/v2/"
 ORDER_BOOK_SNAPSHOT_URL = "order_book/"
 TICKER_URL = "ticker/"
 TRADING_PAIRS_URL = "trading-pairs-info/"
-STREAM_URL = "wss://ws.bitstamp.net"
+# STREAM_URL = "wss://ws.bitstamp.net"
+STREAM_URL = "wss://ws.clients.stagebts.net"
 MAX_RETRIES = 20
 NaN = float("nan")
 
