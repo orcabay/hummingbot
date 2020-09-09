@@ -145,48 +145,44 @@ class BitstampMarketUnitTest(unittest.TestCase):
 
     def test_fee_overrides_config(self):
         fee_overrides_config_map["bitstamp_taker_fee"].value = None
-        taker_fee: TradeFee = self.market.get_fee("LINK", "ETH", OrderType.MARKET, TradeType.BUY, Decimal(1),
+        taker_fee: TradeFee = self.market.get_fee("ETH", "USD", OrderType.MARKET, TradeType.BUY, Decimal(1),
                                                   Decimal('0.1'))
-        self.assertAlmostEqual(Decimal("0.002"), taker_fee.percent)
+        self.assertAlmostEqual(Decimal("0.005"), taker_fee.percent)
         fee_overrides_config_map["bitstamp_taker_fee"].value = Decimal('0.1')
-        taker_fee: TradeFee = self.market.get_fee("LINK", "ETH", OrderType.MARKET, TradeType.BUY, Decimal(1),
+        taker_fee: TradeFee = self.market.get_fee("ETH", "USD", OrderType.MARKET, TradeType.BUY, Decimal(1),
                                                   Decimal('0.1'))
         self.assertAlmostEqual(Decimal("0.001"), taker_fee.percent)
         fee_overrides_config_map["bitstamp_maker_fee"].value = None
-        maker_fee: TradeFee = self.market.get_fee("LINK", "ETH", OrderType.LIMIT, TradeType.BUY, Decimal(1),
+        maker_fee: TradeFee = self.market.get_fee("ETH", "USD", OrderType.LIMIT, TradeType.BUY, Decimal(1),
                                                   Decimal('0.1'))
-        self.assertAlmostEqual(Decimal("0.002"), maker_fee.percent)
+        self.assertAlmostEqual(Decimal("0.005"), maker_fee.percent)
         fee_overrides_config_map["bitstamp_maker_fee"].value = Decimal('0.5')
-        maker_fee: TradeFee = self.market.get_fee("LINK", "ETH", OrderType.LIMIT, TradeType.BUY, Decimal(1),
+        maker_fee: TradeFee = self.market.get_fee("ETH", "USD", OrderType.LIMIT, TradeType.BUY, Decimal(1),
                                                   Decimal('0.1'))
         self.assertAlmostEqual(Decimal("0.005"), maker_fee.percent)
 
-    def place_order(self, is_buy, trading_pair, amount, order_type, price, nonce, get_resp, market_connector=None):
-        global EXCHANGE_ORDER_ID
+    def place_order(self, is_buy, trading_pair, amount, order_type, price):
         order_id, exch_order_id = None, None
-        market = self.market if market_connector is None else market_connector
         if is_buy:
-            order_id = market.buy(trading_pair, amount, order_type, price)
+            order_id = self.market.buy(trading_pair, amount, order_type, price)
         else:
-            order_id = market.sell(trading_pair, amount, order_type, price)
+            order_id = self.market.sell(trading_pair, amount, order_type, price)
         return order_id, exch_order_id
 
     def cancel_order(self, trading_pair, order_id, exchange_order_id, get_resp):
-        global EXCHANGE_ORDER_ID
         self.market.cancel(trading_pair, order_id)
 
     def test_limit_buy(self):
         trading_pair = "ethusd"
 
-        amount: Decimal = Decimal("0.06")
+        amount: Decimal = Decimal("1.0")
         quantized_amount: Decimal = self.market.quantize_order_amount(trading_pair, amount)
 
         current_bid_price: Decimal = self.market.get_price(trading_pair, True)
         bid_price: Decimal = current_bid_price + Decimal("0.05") * current_bid_price
         quantize_bid_price: Decimal = self.market.quantize_order_price(trading_pair, bid_price)
 
-        order_id, _ = self.place_order(True, trading_pair, quantized_amount, OrderType.LIMIT, quantize_bid_price,
-                                       10001, FixtureHuobi.ORDER_GET_LIMIT_BUY_FILLED)
+        order_id, _ = self.place_order(True, trading_pair, quantized_amount, OrderType.LIMIT, quantize_bid_price)
         [order_completed_event] = self.run_parallel(self.market_logger.wait_for(BuyOrderCompletedEvent))
         order_completed_event: BuyOrderCompletedEvent = order_completed_event
         trade_events: List[OrderFilledEvent] = [t for t in self.market_logger.event_log
