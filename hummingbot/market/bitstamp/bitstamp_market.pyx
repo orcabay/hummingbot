@@ -101,8 +101,6 @@ cdef class BitstampMarket(MarketBase):
     MARKET_ORDER_FILLED_EVENT_TAG = MarketEvent.OrderFilled.value
     MARKET_BUY_ORDER_CREATED_EVENT_TAG = MarketEvent.BuyOrderCreated.value
     MARKET_SELL_ORDER_CREATED_EVENT_TAG = MarketEvent.SellOrderCreated.value
-    API_CALL_TIMEOUT = 10.0
-    UPDATE_ORDERS_INTERVAL = 10.0
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
@@ -115,7 +113,7 @@ cdef class BitstampMarket(MarketBase):
                  bitstamp_client_id: str,
                  bitstamp_api_key: str,
                  bitstamp_secret_key: str,
-                 poll_interval: float = 5.0,
+                 poll_interval: float = 1.0,
                  order_book_tracker_data_source_type: OrderBookTrackerDataSourceType =
                  OrderBookTrackerDataSourceType.EXCHANGE_API,
                  trading_pairs: Optional[List[str]] = None,
@@ -308,6 +306,8 @@ cdef class BitstampMarket(MarketBase):
                 raise IOError(f"Error fetching data from {url}. HTTP status is {response.status}.")
             try:
                 parsed_response = await response.json()
+                if type(parsed_response) is bool:
+                    parsed_response = {"status": parsed_response}
             except Exception:
                 raise IOError(f"Error parsing data from {url}.")
             # self.logger().info(f"{response.status}, {method}, {url}, {headers}, {params}, {data}, {parsed_response}")
@@ -405,19 +405,14 @@ cdef class BitstampMarket(MarketBase):
         return await self._api_request("post", path_url=path_url, data={"id": exchange_order_id}, is_auth_required=True)
 
     async def _update_order_status(self):
-        cdef:
-            # The poll interval for order status is 10 seconds.
-            int64_t last_tick = <int64_t>(self._last_poll_timestamp / self.UPDATE_ORDERS_INTERVAL)
-            int64_t current_tick = <int64_t>(self._current_timestamp / self.UPDATE_ORDERS_INTERVAL)
-
-        if current_tick > last_tick and len(self._in_flight_orders) > 0:
+        if len(self._in_flight_orders) > 0:
             tracked_orders = list(self._in_flight_orders.values())
             for tracked_order in tracked_orders:
                 exchange_order_id = await tracked_order.get_exchange_order_id()
                 try:
                     order_update = await self.get_order_status(exchange_order_id)
                 except BitstampAPIError as e:
-                    err_code = e.error_payload.get("error").get("err-code")
+                    err_code = e.error_payload.get("error")
                     self.logger().info(f"The order status request for {tracked_order.client_order_id} "
                                        f"has failed according to order status API. - {err_code}")
                     self.c_trigger_event(
@@ -439,10 +434,13 @@ cdef class BitstampMarket(MarketBase):
                     )
                     continue
 
-                self.logger().info(f"order {order_update}")
-
                 order_state = order_update["status"]
                 # possible order states are "Open", "Finished", "Cancelled"
+
+                if order_state not in ["Open", "Finished", "Cancelled"]:
+                    self.logger().debug(f"Unrecognized order update response - {order_update}")
+
+                tracked_order.last_state = order_state
 
                 for transaction in order_update["transactions"]:
                     # skip already processed transactions
@@ -475,7 +473,7 @@ cdef class BitstampMarket(MarketBase):
                         ),
                         exchange_trade_id=transaction["tid"]
                     ))
-                    self.c_set_last_transaction_id(transaction["tid"])
+                    tracked_order.update_last_transaction_id(transaction["tid"])
 
                 if tracked_order.is_open:
                     continue
@@ -523,17 +521,19 @@ cdef class BitstampMarket(MarketBase):
                 self._poll_notifier = asyncio.Event()
                 await self._poll_notifier.wait()
 
-                await safe_gather(
-                    self._update_balances(),
-                    self._update_order_status(),
-                )
+                # Check orders and balances in sequence because of nonce race condition.
+                # Check order status first because this can trigger further hummingbot actions
+                # and is therefore more important then updating balances
+                await self._update_order_status()
+                await self._update_balances()
+
                 self._last_poll_timestamp = self._current_timestamp
             except asyncio.CancelledError:
                 raise
             except Exception:
                 self.logger().network("Unexpected error while fetching account updates.",
                                       exc_info=True,
-                                      app_warning_msg="Could not fetch account updates from Huobi. "
+                                      app_warning_msg="Could not fetch account updates from Bitstamp. "
                                                       "Check API key and network connection.")
                 await asyncio.sleep(0.5)
 
@@ -577,13 +577,13 @@ cdef class BitstampMarket(MarketBase):
         }
         if order_type is OrderType.LIMIT:
             params["price"] = f"{price:f}"
-        exchange_order_id = await self._api_request(
+        exchange_order = await self._api_request(
             "post",
             path_url=path_url,
             data=params,
             is_auth_required=True
         )
-        return exchange_order_id["id"]
+        return exchange_order["id"]
 
     async def execute_buy(self,
                           order_id: str,
@@ -599,17 +599,13 @@ cdef class BitstampMarket(MarketBase):
             str exchange_order_id
             object tracked_order
 
-        if order_type is OrderType.MARKET:
-            quote_amount = self.c_get_quote_volume_for_base_amount(trading_pair, True, amount).result_volume
-            # Quantize according to price rules, not base token amount rules.
-            decimal_amount = self.c_quantize_order_price(trading_pair, Decimal(quote_amount))
-            decimal_price = s_decimal_0
-        else:
-            decimal_amount = self.c_quantize_order_amount(trading_pair, amount)
-            decimal_price = self.c_quantize_order_price(trading_pair, price)
-            if decimal_amount < trading_rule.min_order_size:
-                raise ValueError(f"Buy order amount {decimal_amount} is lower than the minimum order size "
-                                 f"{trading_rule.min_order_size}.")
+        decimal_amount = self.c_quantize_order_amount(trading_pair, amount)
+        decimal_price = (self.c_quantize_order_price(trading_pair, price)
+                         if order_type is OrderType.LIMIT
+                         else s_decimal_0)
+        if decimal_amount < trading_rule.min_order_size:
+            raise ValueError(f"Buy order amount {decimal_amount} is lower than the minimum order size "
+                             f"{trading_rule.min_order_size}.")
         try:
             exchange_order_id = await self.place_order(order_id, trading_pair, decimal_amount, True, order_type, decimal_price)
             self.c_start_tracking_order(
@@ -738,31 +734,30 @@ cdef class BitstampMarket(MarketBase):
             if tracked_order is None:
                 raise ValueError(f"Failed to cancel order - {order_id}. Order not found.")
             path_url = f"v2/cancel_order/"
-            response = await self._api_request("post", path_url=path_url, data={"id": order_id}, is_auth_required=True)
+            response = await self._api_request("post", path_url=path_url, data={"id": tracked_order.exchange_order_id}, is_auth_required=True)
+            self.logger().info(f"cancel order response {response} {response['id']} {tracked_order.exchange_order_id} {str(response['id']) == tracked_order.exchange_order_id}")
 
-        except BitstampAPIError as e:
-            order_state = e.error_payload.get("error").get("order-state")
-            if order_state == 7:
-                # order-state is canceled
+            if str(response["id"]) == tracked_order.exchange_order_id:
+                self.logger().info("cancel successful")
                 self.c_stop_tracking_order(tracked_order.client_order_id)
                 self.logger().info(f"The order {tracked_order.client_order_id} has been cancelled according"
-                                   f" to order status API. order_state - {order_state}")
+                                   f" to order status API.")
                 self.c_trigger_event(self.MARKET_ORDER_CANCELLED_EVENT_TAG,
                                      OrderCancelledEvent(self._current_timestamp,
                                                          tracked_order.client_order_id))
-            else:
-                self.logger().network(
-                    f"Failed to cancel order {order_id}: {str(e)}",
-                    exc_info=True,
-                    app_warning_msg=f"Failed to cancel the order {order_id} on Huobi. "
-                                    f"Check API key and network connection."
-                )
+        except BitstampAPIError as e:
+            self.logger().network(
+                f"Failed to cancel order {order_id}: {str(e)}",
+                exc_info=True,
+                app_warning_msg=f"Failed to cancel the order {order_id} on Bitstamp. "
+                                f"Check API key and network connection."
+            )
 
         except Exception as e:
             self.logger().network(
                 f"Failed to cancel order {order_id}: {str(e)}",
                 exc_info=True,
-                app_warning_msg=f"Failed to cancel the order {order_id} on Huobi. "
+                app_warning_msg=f"Failed to cancel the order {order_id} on Bitstamp. "
                                 f"Check API key and network connection."
             )
 
@@ -784,14 +779,13 @@ cdef class BitstampMarket(MarketBase):
                 path_url=path_url,
                 is_auth_required=True
             )
-
             for order in open_orders:
-                cancellation_results.append(CancellationResult(order.exchange_order_id, cancel_all_results is "true"))
+                cancellation_results.append(CancellationResult(order.exchange_order_id, cancel_all_results["status"]))
         except Exception as e:
             self.logger().network(
                 f"Failed to cancel all orders: {cancel_order_ids}",
                 exc_info=True,
-                app_warning_msg=f"Failed to cancel all orders on Huobi. Check API key and network connection."
+                app_warning_msg=f"Failed to cancel all orders on Bitstamp. Check API key and network connection."
             )
         return cancellation_results
 

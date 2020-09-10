@@ -48,7 +48,6 @@ from hummingbot.model.sql_connection_manager import (
 )
 from hummingbot.model.trade_fill import TradeFill
 from hummingbot.client.config.fee_overrides_config_map import fee_overrides_config_map
-from test.integration.assets.mock_data.fixture_huobi import FixtureHuobi
 
 CLIENT_ID = conf.bitstamp_client_id
 API_KEY = conf.bitstamp_api_key
@@ -162,14 +161,13 @@ class BitstampMarketUnitTest(unittest.TestCase):
         self.assertAlmostEqual(Decimal("0.005"), maker_fee.percent)
 
     def place_order(self, is_buy, trading_pair, amount, order_type, price):
-        order_id, exch_order_id = None, None
         if is_buy:
             order_id = self.market.buy(trading_pair, amount, order_type, price)
         else:
             order_id = self.market.sell(trading_pair, amount, order_type, price)
-        return order_id, exch_order_id
+        return order_id
 
-    def cancel_order(self, trading_pair, order_id, exchange_order_id, get_resp):
+    def cancel_order(self, trading_pair, order_id):
         self.market.cancel(trading_pair, order_id)
 
     def test_limit_buy(self):
@@ -182,7 +180,7 @@ class BitstampMarketUnitTest(unittest.TestCase):
         bid_price: Decimal = current_bid_price + Decimal("0.05") * current_bid_price
         quantize_bid_price: Decimal = self.market.quantize_order_price(trading_pair, bid_price)
 
-        order_id, _ = self.place_order(True, trading_pair, quantized_amount, OrderType.LIMIT, quantize_bid_price)
+        order_id = self.place_order(True, trading_pair, quantized_amount, OrderType.LIMIT, quantize_bid_price)
         [order_completed_event] = self.run_parallel(self.market_logger.wait_for(BuyOrderCompletedEvent))
         order_completed_event: BuyOrderCompletedEvent = order_completed_event
         trade_events: List[OrderFilledEvent] = [t for t in self.market_logger.event_log
@@ -205,15 +203,14 @@ class BitstampMarketUnitTest(unittest.TestCase):
 
     def test_limit_sell(self):
         trading_pair = "ethusd"
-        amount: Decimal = Decimal("0.06")
+        amount: Decimal = Decimal("0.6")
         quantized_amount: Decimal = self.market.quantize_order_amount(trading_pair, amount)
 
         current_ask_price: Decimal = self.market.get_price(trading_pair, False)
         ask_price: Decimal = current_ask_price - Decimal("0.05") * current_ask_price
         quantize_ask_price: Decimal = self.market.quantize_order_price(trading_pair, ask_price)
 
-        order_id, _ = self.place_order(False, trading_pair, amount, OrderType.LIMIT, quantize_ask_price,
-                                       10001, FixtureHuobi.ORDER_GET_LIMIT_SELL_FILLED)
+        order_id = self.place_order(False, trading_pair, amount, OrderType.LIMIT, quantize_ask_price)
         [order_completed_event] = self.run_parallel(self.market_logger.wait_for(SellOrderCompletedEvent))
         order_completed_event: SellOrderCompletedEvent = order_completed_event
         trade_events: List[OrderFilledEvent] = [t for t in self.market_logger.event_log
@@ -236,11 +233,10 @@ class BitstampMarketUnitTest(unittest.TestCase):
 
     def test_market_buy(self):
         trading_pair = "ethusd"
-        amount: Decimal = Decimal("0.06")
+        amount: Decimal = Decimal("0.6")
         quantized_amount: Decimal = self.market.quantize_order_amount(trading_pair, amount)
 
-        order_id, _ = self.place_order(True, trading_pair, quantized_amount, OrderType.MARKET, 0, 10001,
-                                       FixtureHuobi.ORDER_GET_MARKET_BUY)
+        order_id = self.place_order(True, trading_pair, quantized_amount, OrderType.MARKET, 0)
         [buy_order_completed_event] = self.run_parallel(self.market_logger.wait_for(BuyOrderCompletedEvent))
         buy_order_completed_event: BuyOrderCompletedEvent = buy_order_completed_event
         trade_events: List[OrderFilledEvent] = [t for t in self.market_logger.event_log
@@ -263,11 +259,10 @@ class BitstampMarketUnitTest(unittest.TestCase):
 
     def test_market_sell(self):
         trading_pair = "ethusd"
-        amount: Decimal = Decimal("0.06")
+        amount: Decimal = Decimal("0.6")
         quantized_amount: Decimal = self.market.quantize_order_amount(trading_pair, amount)
 
-        order_id, _ = self.place_order(False, trading_pair, amount, OrderType.MARKET, 0, 10001,
-                                       FixtureHuobi.ORDER_GET_MARKET_SELL)
+        order_id = self.place_order(False, trading_pair, amount, OrderType.MARKET, 0)
         [sell_order_completed_event] = self.run_parallel(self.market_logger.wait_for(SellOrderCompletedEvent))
         sell_order_completed_event: SellOrderCompletedEvent = sell_order_completed_event
         trade_events: List[OrderFilledEvent] = [t for t in self.market_logger.event_log
@@ -292,17 +287,16 @@ class BitstampMarketUnitTest(unittest.TestCase):
         trading_pair = "ethusd"
 
         current_bid_price: Decimal = self.market.get_price(trading_pair, True)
-        amount: Decimal = Decimal("0.05")
+        amount: Decimal = Decimal("0.5")
 
         bid_price: Decimal = current_bid_price - Decimal("0.1") * current_bid_price
         quantize_bid_price: Decimal = self.market.quantize_order_price(trading_pair, bid_price)
         quantized_amount: Decimal = self.market.quantize_order_amount(trading_pair, amount)
 
-        order_id, exch_order_id = self.place_order(True, trading_pair, quantized_amount, OrderType.LIMIT,
-                                                   quantize_bid_price, 10001, FixtureHuobi.ORDER_GET_LIMIT_BUY_UNFILLED)
+        order_id = self.place_order(True, trading_pair, quantized_amount, OrderType.LIMIT, quantize_bid_price)
         [order_created_event] = self.run_parallel(self.market_logger.wait_for(BuyOrderCreatedEvent))
 
-        self.cancel_order(trading_pair, order_id, exch_order_id, FixtureHuobi.ORDER_GET_CANCELED)
+        self.cancel_order(trading_pair, order_id)
         [order_cancelled_event] = self.run_parallel(self.market_logger.wait_for(OrderCancelledEvent))
         order_cancelled_event: OrderCancelledEvent = order_cancelled_event
         self.assertEqual(order_cancelled_event.order_id, order_id)
@@ -310,22 +304,26 @@ class BitstampMarketUnitTest(unittest.TestCase):
     def test_cancel_all(self):
         trading_pair = "ethusd"
 
-        bid_price: Decimal = self.market.get_price(trading_pair, True) * Decimal("0.5")
-        ask_price: Decimal = self.market.get_price(trading_pair, False) * 2
-        amount: Decimal = Decimal("0.06")
+        current_bid_price: Decimal = self.market.get_price(trading_pair, True)
+        current_ask_price: Decimal = self.market.get_price(trading_pair, False)
+
+        bid_price: Decimal = current_bid_price - Decimal("0.1") * current_bid_price
+        ask_price: Decimal = current_ask_price + Decimal("0.1") * current_ask_price
+        amount: Decimal = Decimal("0.6")
         quantized_amount: Decimal = self.market.quantize_order_amount(trading_pair, amount)
 
-        # Intentionally setting invalid price to prevent getting filled
-        quantize_bid_price: Decimal = self.market.quantize_order_price(trading_pair, bid_price * Decimal("0.9"))
-        quantize_ask_price: Decimal = self.market.quantize_order_price(trading_pair, ask_price * Decimal("1.1"))
+        quantize_bid_price: Decimal = self.market.quantize_order_price(trading_pair, bid_price)
+        quantize_ask_price: Decimal = self.market.quantize_order_price(trading_pair, ask_price)
 
-        _, exch_order_id1 = self.place_order(True, trading_pair, quantized_amount, OrderType.LIMIT, quantize_bid_price,
-                                             1001, FixtureHuobi.ORDER_GET_LIMIT_BUY_UNFILLED, self.market)
-        _, exch_order_id2 = self.place_order(False, trading_pair, quantized_amount, OrderType.LIMIT, quantize_ask_price,
-                                             1002, FixtureHuobi.ORDER_GET_LIMIT_SELL_UNFILLED, self.market)
+        self.place_order(True, trading_pair, quantized_amount, OrderType.LIMIT, quantize_bid_price)
+        self.place_order(False, trading_pair, quantized_amount, OrderType.LIMIT, quantize_ask_price)
         self.run_parallel(asyncio.sleep(1))
         [cancellation_results] = self.run_parallel(self.market.cancel_all(5))
         for cr in cancellation_results:
+            # can't test order_id because place_order returns
+            # internal order id, but CancellationResult holds
+            # exchange order id
+            # self.assertIn(cr.order_id, [order_id1, order_id2])
             self.assertEqual(cr.success, True)
 
     def test_orders_saving_and_restoration(self):
@@ -340,17 +338,15 @@ class BitstampMarketUnitTest(unittest.TestCase):
         try:
             self.assertEqual(0, len(self.market.tracking_states))
 
-            # Try to put limit buy order for 0.04 ETH, and watch for order creation event.
+            # Try to put limit buy order for 0.5 ETH, and watch for order creation event.
             current_bid_price: Decimal = self.market.get_price(trading_pair, True)
             bid_price: Decimal = current_bid_price * Decimal("0.8")
             quantize_bid_price: Decimal = self.market.quantize_order_price(trading_pair, bid_price)
 
-            amount: Decimal = Decimal("0.06")
+            amount: Decimal = Decimal("0.5")
             quantized_amount: Decimal = self.market.quantize_order_amount(trading_pair, amount)
 
-            order_id, exch_order_id = self.place_order(True, trading_pair, quantized_amount, OrderType.LIMIT,
-                                                       quantize_bid_price, 10001,
-                                                       FixtureHuobi.ORDER_GET_LIMIT_BUY_UNFILLED)
+            order_id = self.place_order(True, trading_pair, quantized_amount, OrderType.LIMIT, quantize_bid_price)
             [order_created_event] = self.run_parallel(self.market_logger.wait_for(BuyOrderCreatedEvent))
             order_created_event: BuyOrderCreatedEvent = order_created_event
             self.assertEqual(order_id, order_created_event.order_id)
@@ -394,7 +390,7 @@ class BitstampMarketUnitTest(unittest.TestCase):
             self.assertEqual(1, len(self.market.tracking_states))
 
             # Cancel the order and verify that the change is saved.
-            self.cancel_order(trading_pair, order_id, exch_order_id, FixtureHuobi.ORDER_GET_CANCELED)
+            self.cancel_order(trading_pair, order_id)
             self.run_parallel(self.market_logger.wait_for(OrderCancelledEvent))
             order_id = None
             self.assertEqual(0, len(self.market.limit_orders))
@@ -419,10 +415,9 @@ class BitstampMarketUnitTest(unittest.TestCase):
         recorder.start()
 
         try:
-            # Try to buy 0.04 ETH from the exchange, and watch for completion event.
-            amount: Decimal = Decimal("0.06")
-            order_id, _ = self.place_order(True, trading_pair, amount, OrderType.MARKET, 0, 10001,
-                                           FixtureHuobi.ORDER_GET_MARKET_BUY)
+            # Try to buy 0.6 ETH from the exchange, and watch for completion event.
+            amount: Decimal = Decimal("0.6")
+            order_id = self.place_order(True, trading_pair, amount, OrderType.MARKET, 0)
             [buy_order_completed_event] = self.run_parallel(self.market_logger.wait_for(BuyOrderCompletedEvent))
 
             # Reset the logs
@@ -430,8 +425,7 @@ class BitstampMarketUnitTest(unittest.TestCase):
 
             # Try to sell back the same amount of ETH to the exchange, and watch for completion event.
             amount = buy_order_completed_event.base_asset_amount
-            order_id, _ = self.place_order(False, trading_pair, amount, OrderType.MARKET, 0, 10002,
-                                           FixtureHuobi.ORDER_GET_MARKET_SELL)
+            order_id = self.place_order(False, trading_pair, amount, OrderType.MARKET, 0)
             [sell_order_completed_event] = self.run_parallel(self.market_logger.wait_for(SellOrderCompletedEvent))
 
             # Query the persisted trade logs

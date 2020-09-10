@@ -34,23 +34,30 @@ cdef class BitstampInFlightOrder(InFlightOrderBase):
             amount,
             initial_state  # Open, Finished, Cancelled
         )
-        self.last_transaction_id = 0
+        self._last_transaction_id = 0
 
     @property
     def is_done(self) -> bool:
-        return self.last_state is "Finished"
+        return self.last_state == "Finished"
 
     @property
     def is_cancelled(self) -> bool:
-        return self.last_state is "Cancelled"
+        return self.last_state == "Cancelled"
 
     @property
     def is_failure(self) -> bool:
-        return self.last_state is "Finished"
+        return self.last_state == "Finished"
 
     @property
     def is_open(self) -> bool:
-        return self.last_state is "Open"
+        return self.last_state == "Open"
+
+    @property
+    def last_transaction_id(self) -> int:
+        return self._last_transaction_id
+
+    def update_last_transaction_id(self, id: int):
+        self._last_transaction_id = id
 
     @classmethod
     def from_json(cls, data: Dict[str, Any]) -> InFlightOrderBase:
