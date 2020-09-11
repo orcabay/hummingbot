@@ -38,11 +38,11 @@ cdef class BitstampInFlightOrder(InFlightOrderBase):
 
     @property
     def is_done(self) -> bool:
-        return self.last_state == "Finished"
+        return self.last_state in ["Finished", "Canceled"]
 
     @property
     def is_cancelled(self) -> bool:
-        return self.last_state == "Cancelled"
+        return self.last_state == "Canceled"
 
     @property
     def is_failure(self) -> bool:

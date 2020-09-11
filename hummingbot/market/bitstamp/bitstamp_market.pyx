@@ -139,6 +139,7 @@ cdef class BitstampMarket(MarketBase):
         self._trading_rules = {}
         self._trading_rules_polling_task = None
         self._tx_tracker = BitstampMarketTransactionTracker(self)
+        self._nonce_lock = asyncio.Lock()
 
     @staticmethod
     def split_trading_pair(trading_pair: str) -> Optional[Tuple[str, str]]:
@@ -275,6 +276,8 @@ cdef class BitstampMarket(MarketBase):
         url = BITSTAMP_ROOT_URL + path_url
         client = await self._http_client()
         if is_auth_required:
+            # wait to acquire nonce lock
+            await self._nonce_lock.acquire()
             if data is None:
                 data = self._bitstamp_auth.generate_auth_dict()
             else:
@@ -301,17 +304,24 @@ cdef class BitstampMarket(MarketBase):
             )
 
         async with response_coro as response:
-            # self.logger().info(f"{response.status}, {method}, {url}, {headers}, {params}, {data}")
+            if is_auth_required:
+                # release nonce lock
+                self._nonce_lock.release()
             if response.status != 200:
-                raise IOError(f"Error fetching data from {url}. HTTP status is {response.status}.")
+                # parsed_response = await response.json()
+                # if response.status == 403 and ("buy" in url or "sell" in url):
+                #     self.logger().info(f"{method} {url} {data} {parsed_response}")
+                raise IOError(f"Error fetching data from {url} with data {data}. HTTP status is {response.status}.")
             try:
                 parsed_response = await response.json()
+                # self.logger().info(f"{method} {url} {data} {parsed_response}")
                 if type(parsed_response) is bool:
                     parsed_response = {"status": parsed_response}
             except Exception:
                 raise IOError(f"Error parsing data from {url}.")
-            # self.logger().info(f"{response.status}, {method}, {url}, {headers}, {params}, {data}, {parsed_response}")
             if "error" in parsed_response:
+                if parsed_response["error"] == "Order not found":
+                    return {"id": data["id"]}
                 self.logger().error(f"Error received from {url}. Response is {parsed_response}.")
                 raise BitstampAPIError({"error": parsed_response["error"]})
             return parsed_response
@@ -435,9 +445,9 @@ cdef class BitstampMarket(MarketBase):
                     continue
 
                 order_state = order_update["status"]
-                # possible order states are "Open", "Finished", "Cancelled"
+                # possible order states are "Open", "Finished", "Canceled"
 
-                if order_state not in ["Open", "Finished", "Cancelled"]:
+                if order_state not in ["Open", "Finished", "Canceled"]:
                     self.logger().debug(f"Unrecognized order update response - {order_update}")
 
                 tracked_order.last_state = order_state
@@ -507,7 +517,7 @@ cdef class BitstampMarket(MarketBase):
                                                                          tracked_order.executed_amount_quote,
                                                                          tracked_order.fee_paid,
                                                                          tracked_order.order_type))
-                    else:  # Handles "canceled" or "partial-canceled" order
+                    else:  # Handles "cancelled" or "partial-canceled" order
                         self.c_stop_tracking_order(tracked_order.client_order_id)
                         self.logger().info(f"The market order {tracked_order.client_order_id} "
                                            f"has been cancelled according to order status API.")
@@ -530,11 +540,11 @@ cdef class BitstampMarket(MarketBase):
                 self._last_poll_timestamp = self._current_timestamp
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as e:
                 self.logger().network("Unexpected error while fetching account updates.",
                                       exc_info=True,
                                       app_warning_msg="Could not fetch account updates from Bitstamp. "
-                                                      "Check API key and network connection.")
+                                                      f"Check API key and network connection. {e}")
                 await asyncio.sleep(0.5)
 
     async def _trading_rules_polling_loop(self):
@@ -631,7 +641,7 @@ cdef class BitstampMarket(MarketBase):
                                  ))
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as e:
             self.c_stop_tracking_order(order_id)
             order_type_str = "MARKET" if order_type == OrderType.MARKET else "LIMIT"
             self.logger().network(
@@ -639,7 +649,7 @@ cdef class BitstampMarket(MarketBase):
                 f"{decimal_amount} {trading_pair} "
                 f"{decimal_price if order_type is OrderType.LIMIT else ''}.",
                 exc_info=True,
-                app_warning_msg=f"Failed to submit buy order to Bitstamp. Check API key and network connection."
+                app_warning_msg=f"Failed to submit buy order to Bitstamp. Check API key and network connection. {e}"
             )
             self.c_trigger_event(self.MARKET_ORDER_FAILURE_EVENT_TAG,
                                  MarketOrderFailureEvent(self._current_timestamp, order_id, order_type))
@@ -703,7 +713,7 @@ cdef class BitstampMarket(MarketBase):
                                  ))
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as e:
             self.c_stop_tracking_order(order_id)
             order_type_str = "MARKET" if order_type is OrderType.MARKET else "LIMIT"
             self.logger().network(
@@ -711,7 +721,7 @@ cdef class BitstampMarket(MarketBase):
                 f"{decimal_amount} {trading_pair} "
                 f"{decimal_price if order_type is OrderType.LIMIT else ''}.",
                 exc_info=True,
-                app_warning_msg=f"Failed to submit sell order to Bitstamp. Check API key and network connection."
+                app_warning_msg=f"Failed to submit sell order to Bitstamp. Check API key and network connection. {e}"
             )
             self.c_trigger_event(self.MARKET_ORDER_FAILURE_EVENT_TAG,
                                  MarketOrderFailureEvent(self._current_timestamp, order_id, order_type))
@@ -735,10 +745,8 @@ cdef class BitstampMarket(MarketBase):
                 raise ValueError(f"Failed to cancel order - {order_id}. Order not found.")
             path_url = f"v2/cancel_order/"
             response = await self._api_request("post", path_url=path_url, data={"id": tracked_order.exchange_order_id}, is_auth_required=True)
-            self.logger().info(f"cancel order response {response} {response['id']} {tracked_order.exchange_order_id} {str(response['id']) == tracked_order.exchange_order_id}")
 
             if str(response["id"]) == tracked_order.exchange_order_id:
-                self.logger().info("cancel successful")
                 self.c_stop_tracking_order(tracked_order.client_order_id)
                 self.logger().info(f"The order {tracked_order.client_order_id} has been cancelled according"
                                    f" to order status API.")
