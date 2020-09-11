@@ -153,13 +153,13 @@ cdef class BitstampMarket(MarketBase):
     def convert_from_exchange_trading_pair(exchange_trading_pair: str) -> Optional[str]:
         if BitstampMarket.split_trading_pair(exchange_trading_pair) is None:
             return None
-        # Huobi uses lowercase (btcusdt)
+        # Bitstamp uses lowercase (btcusd)
         base_asset, quote_asset = BitstampMarket.split_trading_pair(exchange_trading_pair)
         return f"{base_asset.upper()}-{quote_asset.upper()}"
 
     @staticmethod
     def convert_to_exchange_trading_pair(hb_trading_pair: str) -> str:
-        # Huobi uses lowercase (btcusdt)
+        # Bitstamp uses lowercase (btcusd)
         return hb_trading_pair.replace("-", "").lower()
 
     @property

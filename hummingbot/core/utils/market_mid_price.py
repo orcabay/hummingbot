@@ -3,10 +3,12 @@ from decimal import Decimal
 from typing import Optional
 import cachetools.func
 from hummingbot.market.binance.binance_market import BinanceMarket
+from hummingbot.market.bitstamp.bitstamp_market import BitstampMarket
 from hummingbot.market.kraken.kraken_market import KrakenMarket
 
 
 BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/bookTicker"
+BITSTAMP_PRICE_URL = "https://www.bitstamp.net/api/v2/ticker/"
 KUCOIN_PRICE_URL = "https://api.kucoin.com/api/v1/market/allTickers"
 LIQUID_PRICE_URL = "https://api.liquid.com/products"
 BITTREX_PRICE_URL = "https://api.bittrex.com/api/v1.1/public/getmarketsummaries"
@@ -17,6 +19,8 @@ COINBASE_PRO_PRICE_URL = "https://api.pro.coinbase.com/products/TO_BE_REPLACED/t
 def get_mid_price(exchange: str, trading_pair: str) -> Optional[Decimal]:
     if exchange == "binance":
         return binance_mid_price(trading_pair)
+    elif exchange == "bitstamp":
+        return bitstamp_mid_price(trading_pair)
     elif exchange == "kucoin":
         return kucoin_mid_price(trading_pair)
     elif exchange == "liquid":
@@ -41,6 +45,15 @@ def binance_mid_price(trading_pair: str) -> Optional[Decimal]:
         if trading_pair == pair and record["bidPrice"] is not None and record["askPrice"] is not None:
             result = (Decimal(record["bidPrice"]) + Decimal(record["askPrice"])) / Decimal("2")
             break
+    return result
+
+
+@cachetools.func.ttl_cache(ttl=10)
+def bitstamp_mid_price(trading_pair: str) -> Optional[Decimal]:
+    pair = BitstampMarket.convert_to_exchange_trading_pair(trading_pair)
+    resp = requests.get(url=f"{BITSTAMP_PRICE_URL}{pair}/")
+    record = resp.json()
+    result = (Decimal(record["bid"]) + Decimal(record["ask"])) / Decimal("2")
     return result
 
 

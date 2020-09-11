@@ -14,6 +14,7 @@ from .async_utils import safe_ensure_future
 from .ssl_client_request import SSLClientRequest
 
 BINANCE_ENDPOINT = "https://api.binance.com/api/v1/exchangeInfo"
+BITSTAMP_ENDPOINT = "https://www.bitstamp.net/api/v2/trading-pairs-info/"
 RADAR_RELAY_ENDPOINT = "https://api.radarrelay.com/v3/markets"
 BAMBOO_RELAY_ENDPOINT = "https://rest.bamboorelay.com/main/0x/markets"
 COINBASE_PRO_ENDPOINT = "https://api.pro.coinbase.com/products/"
@@ -79,6 +80,30 @@ class TradingPairFetcher:
 
         except Exception:
             # Do nothing if the request fails -- there will be no autocomplete for binance trading pairs
+            pass
+
+        return []
+
+    async def fetch_bitstamp_trading_pairs(self) -> List[str]:
+        try:
+            from hummingbot.market.bitstamp.bitstamp_market import BitstampMarket
+            client: aiohttp.ClientSession = self.http_client()
+            async with client.get(BITSTAMP_ENDPOINT, timeout=API_CALL_TIMEOUT) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    raw_trading_pairs = [d["url_symbol"] for d in data if d["trading"] == "Enabled"]
+                    trading_pair_list: List[str] = []
+                    for raw_trading_pair in raw_trading_pairs:
+                        converted_trading_pair: Optional[str] = \
+                            BitstampMarket.convert_from_exchange_trading_pair(raw_trading_pair)
+                        if converted_trading_pair is not None:
+                            trading_pair_list.append(converted_trading_pair)
+                        else:
+                            self.logger().debug(f"Could not parse the trading pair {raw_trading_pair}, skipping it...")
+                    return trading_pair_list
+
+        except Exception:
+            # Do nothing if the request fails -- there will be no autocomplete for bitstamo trading pairs
             pass
 
         return []
@@ -364,7 +389,8 @@ class TradingPairFetcher:
                  self.fetch_bitcoin_com_trading_pairs(),
                  self.fetch_kraken_trading_pairs(),
                  self.fetch_radar_relay_trading_pairs(),
-                 self.fetch_eterbase_trading_pairs()]
+                 self.fetch_eterbase_trading_pairs(),
+                 self.fetch_bitstamp_trading_pairs()]
 
         # Radar Relay has not yet been migrated to a new version
         # Endpoint needs to be updated after migration
@@ -383,6 +409,7 @@ class TradingPairFetcher:
             "bitcoin_com": results[8],
             "kraken": results[9],
             "radar_relay": results[10],
-            "eterbase": results[11]
+            "eterbase": results[11],
+            "bitstamp": results[12]
         }
         self.ready = True

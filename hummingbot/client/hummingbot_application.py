@@ -13,6 +13,7 @@ from hummingbot.core.data_type.user_stream_tracker import UserStreamTrackerDataS
 from hummingbot.logger import HummingbotLogger
 from hummingbot.logger.application_warning import ApplicationWarning
 from hummingbot.market.binance.binance_market import BinanceMarket
+from hummingbot.market.bitstamp.bitstamp_market import BitstampMarket
 from hummingbot.market.bittrex.bittrex_market import BittrexMarket
 from hummingbot.market.kucoin.kucoin_market import KucoinMarket
 from hummingbot.market.coinbase_pro.coinbase_pro_market import CoinbaseProMarket
@@ -54,6 +55,7 @@ s_logger = None
 MARKET_CLASSES = {
     "bamboo_relay": BambooRelayMarket,
     "binance": BinanceMarket,
+    "bitstamp": BitstampMarket,
     "coinbase_pro": CoinbaseProMarket,
     "huobi": HuobiMarket,
     "liquid": LiquidMarket,
@@ -256,6 +258,18 @@ class HummingbotApplication(*commands):
                     binance_api_key,
                     binance_api_secret,
                     order_book_tracker_data_source_type=OrderBookTrackerDataSourceType.EXCHANGE_API,
+                    trading_pairs=trading_pairs,
+                    trading_required=self._trading_required,
+                )
+
+            elif market_name == "bitstamp":
+                bitstamp_client_id = global_config_map.get("bitstamp_client_id").value
+                bitstamp_api_key = global_config_map.get("bitstamp_api_key").value
+                bitstamp_api_secret = global_config_map.get("bitstamp_api_secret").value
+                market = BitstampMarket(
+                    bitstamp_client_id,
+                    bitstamp_api_key,
+                    bitstamp_api_secret,
                     trading_pairs=trading_pairs,
                     trading_required=self._trading_required,
                 )
