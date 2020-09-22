@@ -2,9 +2,9 @@ import requests
 from decimal import Decimal
 from typing import Optional
 import cachetools.func
-from hummingbot.market.binance.binance_market import BinanceMarket
-from hummingbot.market.bitstamp.bitstamp_market import BitstampMarket
-from hummingbot.market.kraken.kraken_market import KrakenMarket
+from hummingbot.connector.exchange.binance.binance_market import BinanceMarket
+from hummingbot.connector.exchange.kraken.kraken_market import KrakenMarket
+from hummingbot.connector.exchange.bitstamp.bitstamp_utils import convert_to_exchange_trading_pair
 
 
 BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/bookTicker"
@@ -50,7 +50,7 @@ def binance_mid_price(trading_pair: str) -> Optional[Decimal]:
 
 @cachetools.func.ttl_cache(ttl=10)
 def bitstamp_mid_price(trading_pair: str) -> Optional[Decimal]:
-    pair = BitstampMarket.convert_to_exchange_trading_pair(trading_pair)
+    pair = convert_to_exchange_trading_pair(trading_pair)
     resp = requests.get(url=f"{BITSTAMP_PRICE_URL}{pair}/")
     record = resp.json()
     result = (Decimal(record["bid"]) + Decimal(record["ask"])) / Decimal("2")
